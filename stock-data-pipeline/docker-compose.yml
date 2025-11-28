@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: stocks_postgres
+    environment:
+      POSTGRES_USER: stocks_user
+      POSTGRES_PASSWORD: stocks_password
+      POSTGRES_DB: airflow_meta
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stocks_user -d airflow_meta"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  airflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: airflow_stock_pipeline
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Airflow Core Settings
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__FERNET_KEY: "supersecretkey123456"
+      AIRFLOW__DATABASE__LOAD_DEFAULT_CONNECTIONS: "False"
+
+      # Database Connection
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://stocks_user:stocks_password@postgres:5432/airflow_meta
+
+      # Auto-create Admin user (no manual login creation)
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: "admin"
+      _AIRFLOW_WWW_USER_PASSWORD: "admin"
+      _AIRFLOW_WWW_USER_FIRSTNAME: "Roopendra"
+      _AIRFLOW_WWW_USER_LASTNAME: "Mardala"
+      _AIRFLOW_WWW_USER_EMAIL: "mardalaroopendra@gmail.com"
+      _AIRFLOW_WWW_USER_ROLE: "Admin"
+
+      # Stock API Config
+      STOCK_API_KEY: ${STOCK_API_KEY}
+      STOCK_API_SYMBOL: ${STOCK_API_SYMBOL:-IBM}
+      STOCK_API_BASE_URL: ${STOCK_API_BASE_URL:-https://www.alphavantage.co/query}
+
+      # DB settings for ETL usage
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: airflow_meta
+      POSTGRES_USER: stocks_user
+      POSTGRES_PASSWORD: stocks_password
+
+      TZ: "Asia/Kolkata"
+
+    volumes:
+      - ./dags:/opt/airflow/dags
+    ports:
+      - "8080:8080"
+
+    command: >
+      bash -c "
+      airflow db migrate &&
+      airflow scheduler & 
+      airflow webserver
+      "
+
+    restart: always
+
+volumes:
+  postgres_data:
